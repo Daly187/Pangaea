@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // PLAYERS COLLECTION
+    // ============================================
+    match /players/{userId} {
+      // Users can read their own data
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Users can create their own document on signup
+      allow create: if request.auth != null && request.auth.uid == userId;
+
+      // Users can update their own data (with restrictions)
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['createdAt', 'homeLocation']);
+
+      // Home location can only be set once (not changed)
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && resource.data.homeLocation.set == false
+                    && request.resource.data.homeLocation.set == true;
+
+      // Never allow delete
+      allow delete: if false;
+    }
+
+    // Public player profiles (limited data)
+    match /playerProfiles/{oderId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only cloud functions can write
+    }
+
+    // ============================================
+    // CLANS COLLECTION
+    // ============================================
+    match /clans/{clanId} {
+      // Anyone authenticated can read clan info
+      allow read: if request.auth != null;
+
+      // Only the leader can create/update clan
+      allow create: if request.auth != null
+                    && request.resource.data.leaderId == request.auth.uid;
+
+      allow update: if request.auth != null
+                    && resource.data.leaderId == request.auth.uid;
+
+      // Leader can delete (disband) clan
+      allow delete: if request.auth != null
+                    && resource.data.leaderId == request.auth.uid;
+    }
+
+    // Clan members subcollection
+    match /clans/{clanId}/members/{memberId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && get(/databases/$(database)/documents/clans/$(clanId)).data.leaderId == request.auth.uid;
+    }
+
+    // ============================================
+    // BUILDINGS COLLECTION
+    // ============================================
+    match /buildings/{buildingId} {
+      // Anyone can read buildings (for world loading)
+      allow read: if request.auth != null;
+
+      // Owner can create buildings
+      allow create: if request.auth != null
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      // Owner can update (damage, repair)
+      allow update: if request.auth != null
+                    && resource.data.ownerId == request.auth.uid;
+
+      // Owner can delete (demolish)
+      allow delete: if request.auth != null
+                    && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ============================================
+    // BOUNTIES COLLECTION
+    // ============================================
+    match /bounties/{targetId} {
+      // Anyone can read bounties
+      allow read: if request.auth != null;
+
+      // Anyone can add to a bounty (contribute)
+      allow create, update: if request.auth != null;
+
+      // Only cloud functions can delete (when claimed)
+      allow delete: if false;
+    }
+
+    // ============================================
+    // WORLD EVENTS (Read-only for clients)
+    // ============================================
+    match /worldEvents/{eventId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only cloud functions
+    }
+
+    // ============================================
+    // CHAT MESSAGES
+    // ============================================
+    match /chat/{messageId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}
