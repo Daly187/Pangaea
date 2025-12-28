@@ -3,6 +3,7 @@ using Pangaea.Core;
 using Pangaea.Combat;
 using Pangaea.Survival;
 using Pangaea.Inventory;
+using Pangaea.AI;
 
 namespace Pangaea.Player
 {
@@ -33,6 +34,8 @@ namespace Pangaea.Player
         [SerializeField] private float walkSoundRadius = 5f;
         [SerializeField] private float runSoundRadius = 15f;
         [SerializeField] private float combatSoundRadius = 30f;
+        [SerializeField] private float footstepInterval = 0.5f;
+        [SerializeField] private float runFootstepInterval = 0.3f;
 
         // Components
         private CharacterController characterController;
@@ -51,6 +54,9 @@ namespace Pangaea.Player
         private PvPMode pvpMode = PvPMode.Engaged;
         private float pvpModeChangeTimer = 0f;
         private const float PVP_MODE_COOLDOWN = 30f;
+
+        // Sound emission
+        private float lastFootstepTime;
 
         // Properties
         public uint PlayerId => playerId;
@@ -94,6 +100,7 @@ namespace Pangaea.Player
             UpdateInput();
             UpdateMovement();
             UpdatePvPModeTimer();
+            UpdateFootstepSounds();
         }
 
         private void UpdateInput()
@@ -233,6 +240,25 @@ namespace Pangaea.Player
             }
         }
 
+        private void UpdateFootstepSounds()
+        {
+            // Only emit sounds when moving
+            if (moveDirection.magnitude < 0.1f) return;
+
+            float interval = isRunning ? runFootstepInterval : footstepInterval;
+
+            if (Time.time - lastFootstepTime >= interval)
+            {
+                lastFootstepTime = Time.time;
+
+                // Emit sound for zombie detection
+                SoundType soundType = isRunning ? SoundType.Running : SoundType.Footstep;
+                float loudness = isRunning ? 1.0f : 0.5f;
+
+                ZombieSenses.MakeSound(transform.position, loudness, soundType);
+            }
+        }
+
         public bool CanBeAttacked()
         {
             return pvpMode == PvPMode.Engaged;
@@ -252,6 +278,9 @@ namespace Pangaea.Player
             // Grant combat sounds for nearby detection
             EmitSound(combatSoundRadius);
 
+            // Alert zombies to combat
+            ZombieSenses.MakeSound(transform.position, 1f, SoundType.Combat);
+
             if (stats.CurrentHealth <= 0)
             {
                 Die(attacker);
@@ -269,6 +298,15 @@ namespace Pangaea.Player
                 // Player can "hear" this player
                 // Used for stealth detection and proximity voice
             }
+        }
+
+        /// <summary>
+        /// Emit a sound that zombies can hear.
+        /// Called during combat, building, etc.
+        /// </summary>
+        public void EmitZombieSound(SoundType type, float loudness = 1f)
+        {
+            ZombieSenses.MakeSound(transform.position, loudness, type);
         }
 
         private void Die(PlayerController killer)
