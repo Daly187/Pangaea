@@ -25,7 +25,11 @@ namespace Pangaea.Player
         [Header("Regeneration")]
         [SerializeField] private float healthRegenRate = 1f; // Per second when not in combat
         [SerializeField] private float staminaRegenRate = 15f;
-        [SerializeField] private float hungerDecayRate = 0.5f; // Per minute
+        [SerializeField] private float hungerDecayRate = 0.5f; // Per minute when idle
+
+        [Header("Energy Drain (Running)")]
+        [SerializeField] private float runningHungerMultiplier = 3f; // Running drains hunger 3x faster
+        [SerializeField] private float combatHungerMultiplier = 2f; // Combat drains hunger 2x faster
 
         [Header("Attributes")]
         [SerializeField] private PlayerAttributes attributes;
@@ -41,6 +45,10 @@ namespace Pangaea.Player
         // Combat state
         private float lastCombatTime = -100f;
         private const float COMBAT_COOLDOWN = 10f;
+
+        // Activity state (set by PlayerController)
+        private bool isRunning = false;
+        private bool isInCombat = false;
 
         // Events
         public event Action<int> OnLevelChanged;
@@ -106,8 +114,18 @@ namespace Pangaea.Player
 
         private void UpdateHunger()
         {
-            // Hunger decays over time
-            currentHunger -= (hungerDecayRate / 60f) * Time.deltaTime;
+            // Calculate hunger multiplier based on activity
+            float hungerMultiplier = 1f;
+            if (isRunning) hungerMultiplier = runningHungerMultiplier;
+            else if (isInCombat) hungerMultiplier = combatHungerMultiplier;
+
+            // Survival attribute reduces hunger decay
+            float survivalBonus = 1f - (attributes.Survival * 0.05f); // 5% reduction per point
+            survivalBonus = Mathf.Max(0.5f, survivalBonus); // Cap at 50% reduction
+
+            // Hunger decays over time (faster when running/fighting)
+            float hungerDrain = (hungerDecayRate / 60f) * hungerMultiplier * survivalBonus * Time.deltaTime;
+            currentHunger -= hungerDrain;
             currentHunger = Mathf.Max(0f, currentHunger);
 
             // Starving causes damage
@@ -117,6 +135,23 @@ namespace Pangaea.Player
             }
 
             OnHungerChanged?.Invoke(currentHunger, maxHunger);
+        }
+
+        /// <summary>
+        /// Set running state (called by PlayerController)
+        /// </summary>
+        public void SetRunning(bool running)
+        {
+            isRunning = running;
+        }
+
+        /// <summary>
+        /// Set combat state
+        /// </summary>
+        public void SetInCombat(bool combat)
+        {
+            isInCombat = combat;
+            if (combat) lastCombatTime = Time.time;
         }
 
         public void TakeDamage(float damage)

@@ -145,10 +145,14 @@ namespace Pangaea.Player
             // Calculate speed
             float currentSpeed = isRunning ? runSpeed : walkSpeed;
 
-            // Apply stamina cost for running
-            if (isRunning && stats != null)
+            // Apply stamina cost for running and notify stats
+            if (stats != null)
             {
-                stats.UseStamina(runStaminaCost * Time.deltaTime);
+                stats.SetRunning(isRunning);
+                if (isRunning)
+                {
+                    stats.UseStamina(runStaminaCost * Time.deltaTime);
+                }
             }
 
             // Convert to camera-relative movement (isometric)
