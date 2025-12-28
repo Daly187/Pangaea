@@ -23,9 +23,15 @@ namespace Pangaea.Player
         [SerializeField] private float currentHunger = 100f;
 
         [Header("Regeneration")]
-        [SerializeField] private float healthRegenRate = 1f; // Per second when not in combat
         [SerializeField] private float staminaRegenRate = 15f;
         [SerializeField] private float hungerDecayRate = 0.5f; // Per minute when idle
+
+        [Header("Health Regen (CoD Style)")]
+        [SerializeField] private float regenDelayAfterDamage = 5f; // Seconds before regen starts
+        [SerializeField] private float fastRegenRate = 0.83f; // ~50 HP in 60 seconds (to 50%)
+        [SerializeField] private float slowRegenRate = 0.014f; // ~50 HP in 60 minutes (50% to 100%)
+        [SerializeField] private float fedRegenMultiplier = 3f; // Eating boosts regen 3x
+        [SerializeField] private float wellFedThreshold = 70f; // Hunger above this = "well fed"
 
         [Header("Energy Drain (Running)")]
         [SerializeField] private float runningHungerMultiplier = 3f; // Running drains hunger 3x faster
@@ -43,12 +49,16 @@ namespace Pangaea.Player
         [SerializeField] private int bountyGold = 0;
 
         // Combat state
+        private float lastDamageTime = -100f;
         private float lastCombatTime = -100f;
         private const float COMBAT_COOLDOWN = 10f;
 
         // Activity state (set by PlayerController)
         private bool isRunning = false;
         private bool isInCombat = false;
+
+        // Regen state
+        private bool isRegenerating = false;
 
         // Events
         public event Action<int> OnLevelChanged;
@@ -71,6 +81,8 @@ namespace Pangaea.Player
         public bool IsProfessionLocked => professionLocked;
         public PlayerAttributes Attributes => attributes;
         public ReputationTier ReputationTier => GetReputationTier();
+        public bool IsRegenerating => isRegenerating;
+        public float HealthPercent => currentHealth / maxHealth;
 
         // XP required per level
         private static readonly int[] XP_REQUIREMENTS = { 0, 100, 250, 500, 1000, 2000, 4000, 7000, 11000, 16000 };
@@ -102,14 +114,83 @@ namespace Pangaea.Player
                 OnStaminaChanged?.Invoke(currentStamina, maxStamina);
             }
 
-            // Health regenerates when out of combat and fed
-            bool inCombat = Time.time - lastCombatTime < COMBAT_COOLDOWN;
-            if (!inCombat && currentHunger > 20f && currentHealth < maxHealth)
+            // Health regen (CoD style)
+            UpdateHealthRegeneration();
+        }
+
+        /// <summary>
+        /// CoD-style health regeneration:
+        /// - Wait for delay after taking damage
+        /// - Fast regen to 50% (~1 minute)
+        /// - Slow regen from 50% to 100% (~1 hour)
+        /// - Eating food multiplies regen rate
+        /// </summary>
+        private void UpdateHealthRegeneration()
+        {
+            // Don't regen if dead
+            if (currentHealth <= 0) return;
+
+            // Don't regen if at full health
+            if (currentHealth >= maxHealth)
             {
-                float regenMultiplier = currentHunger > 50f ? 1f : 0.5f;
-                currentHealth = Mathf.Min(maxHealth, currentHealth + healthRegenRate * regenMultiplier * Time.deltaTime);
-                OnHealthChanged?.Invoke(currentHealth, maxHealth);
+                isRegenerating = false;
+                return;
             }
+
+            // Check if enough time has passed since taking damage
+            float timeSinceDamage = Time.time - lastDamageTime;
+            if (timeSinceDamage < regenDelayAfterDamage)
+            {
+                isRegenerating = false;
+                return;
+            }
+
+            isRegenerating = true;
+
+            // Calculate current health percentage
+            float healthPercent = currentHealth / maxHealth;
+
+            // Determine regen rate based on health percentage
+            float baseRegenRate;
+            if (healthPercent < 0.5f)
+            {
+                // Fast regen phase (0% to 50%)
+                // ~50 HP in 60 seconds = 0.83 HP/sec
+                baseRegenRate = fastRegenRate;
+            }
+            else
+            {
+                // Slow regen phase (50% to 100%)
+                // ~50 HP in 60 minutes = 0.014 HP/sec
+                baseRegenRate = slowRegenRate;
+            }
+
+            // Food bonus: well-fed players heal faster
+            float foodMultiplier = 1f;
+            if (currentHunger >= wellFedThreshold)
+            {
+                // Well fed - heal 3x faster
+                foodMultiplier = fedRegenMultiplier;
+            }
+            else if (currentHunger >= 30f)
+            {
+                // Partially fed - heal 1.5x faster
+                foodMultiplier = 1.5f;
+            }
+            else if (currentHunger <= 0f)
+            {
+                // Starving - no healing (taking damage instead)
+                return;
+            }
+
+            // Endurance attribute bonus (+5% per point)
+            float enduranceBonus = 1f + (attributes.Endurance * 0.05f);
+
+            // Calculate final regen
+            float regenAmount = baseRegenRate * foodMultiplier * enduranceBonus * Time.deltaTime;
+            currentHealth = Mathf.Min(maxHealth, currentHealth + regenAmount);
+
+            OnHealthChanged?.Invoke(currentHealth, maxHealth);
         }
 
         private void UpdateHunger()
@@ -156,7 +237,10 @@ namespace Pangaea.Player
 
         public void TakeDamage(float damage)
         {
+            lastDamageTime = Time.time;
             lastCombatTime = Time.time;
+            isRegenerating = false;
+
             currentHealth -= damage;
             currentHealth = Mathf.Max(0f, currentHealth);
 
